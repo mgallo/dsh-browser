@@ -5,7 +5,8 @@
  * so `pnpm typecheck` and `pnpm build` work without publishing anything.
  *
  * Usage:  node scripts/link-dev.mjs /path/to/deepseek-harness
- *         (defaults to ../deepseek-harness)
+ *         node --env-file=.env scripts/link-dev.mjs   (DSH_HARNESS_CHECKOUT)
+ *         (fallback: ../deepseek-harness)
  */
 import { existsSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -13,11 +14,14 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
-const harness = resolve(process.argv[2] ?? join(root, '..', 'deepseek-harness'))
+const harness = resolve(
+  process.argv[2] ?? process.env.DSH_HARNESS_CHECKOUT ?? join(root, '..', 'deepseek-harness'),
+)
 
 if (!existsSync(harness)) {
   console.error(`Harness checkout not found at ${harness}.`)
-  console.error('Pass its path explicitly: node scripts/link-dev.mjs /path/to/deepseek-harness')
+  console.error('Pass it explicitly (node scripts/link-dev.mjs /path/to/deepseek-harness),')
+  console.error('or set DSH_HARNESS_CHECKOUT in .env and use `node --env-file=.env`.')
   process.exit(1)
 }
 

@@ -13,7 +13,7 @@ The agent drives a **dedicated Google Chrome over the Chrome DevTools Protocol (
 
 ## Requirements
 
-- Node.js 22.19+ / 24+ (matching the harness).
+- Node.js 24+.
 - A DeepSeek Harness installation or source checkout.
 - Google Chrome installed (Playwright's `channel: 'chrome'` default). Optionally override with `executablePath` or another `channel`.
 
@@ -32,7 +32,7 @@ dsh web
 From a source checkout of the harness, the same commands use `pnpm dsh`:
 
 ```sh
-pnpm dsh plugin --profile web add /Users/mgallo/repo/deepseek-chrome
+pnpm dsh plugin --profile web add /path/to/dsh-chrome
 pnpm dsh web
 ```
 
@@ -47,13 +47,13 @@ or a self-contained `prepare` script (see the harness [publish guide](https://gi
 Build first, then load the built entry as a patch overlay on the web profile:
 
 ```sh
-node scripts/link-dev.mjs /Users/mgallo/repo/deepseek-harness
+node scripts/link-dev.mjs /path/to/deepseek-harness
 pnpm build
-pnpm dsh web --patch /Users/mgallo/repo/deepseek-chrome/dev.patch.yml
+pnpm dsh web --patch /path/to/dsh-chrome/dev.patch.yml
 ```
 
-`dev.patch.yml` references the built `lib/index.js` by absolute path; edit it
-if your checkout lives elsewhere.
+`dev.patch.yml` is gitignored: copy `dev.patch.yml.example` and set the
+absolute path of your checkout (the loader does not rebase patch paths).
 
 ## Usage
 

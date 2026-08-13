@@ -32,7 +32,7 @@ src/browser.ts      BrowserService — Playwright/CDP lifecycle, tabs, console/n
 src/tools.ts        the 15 browser_* tool definitions (defineTool)
 src/config.ts       Config interface + Schemastery schema (all fields have defaults)
 cordis.patch.yml    bundle layer: inserts row `name: dsh-chrome` (the installed package)
-dev.patch.yml       dev overlay: loads lib/index.js by absolute path (--patch flow)
+dev.patch.yml       dev overlay (--patch flow); gitignored, copied from dev.patch.yml.example
 tsconfig.json       typecheck config (moduleResolution: bundler; see "Typecheck")
 tsdown.config.ts    build config (ESM bundle, externals kept external)
 scripts/link-dev.mjs  symlinks harness packages + playwright-core into node_modules for dev
@@ -109,7 +109,8 @@ Resolve a snapshot ref for click/type/fill with
 
 ```sh
 # one-time: link harness deps + toolchain into node_modules
-node scripts/link-dev.mjs /Users/mgallo/repo/deepseek-harness
+# (reads DSH_HARNESS_CHECKOUT from .env; or pass the harness path as argv)
+node --env-file=.env scripts/link-dev.mjs
 
 pnpm typecheck   # tsc --noEmit (resolves @deepseek-ai/* via the symlinks)
 pnpm build       # tsdown -> lib/index.js + lib/index.d.ts
@@ -151,14 +152,14 @@ Two ways — both require a **restart** of the running `dsh web` process.
 1. **Bundle (persistent).** Add the plugin to the GUI profile and boot it:
 
    ```sh
-   dsh plugin --profile web add /Users/mgallo/repo/deepseek-chrome
+   dsh plugin --profile web add "$DSH_CHROME_CHECKOUT"
    dsh web
    ```
 
 2. **`--patch` overlay (dev iteration):**
 
    ```sh
-   pnpm dsh web --patch /Users/mgallo/repo/deepseek-chrome/dev.patch.yml
+   pnpm dsh web --patch "$DSH_CHROME_CHECKOUT/dev.patch.yml"
    ```
 
 ## CLI / profile gotchas
@@ -208,12 +209,20 @@ Two ways — both require a **restart** of the running `dsh web` process.
 - Chrome extension + native messaging to control the user's existing session.
 - More interactions (scroll/drag, file upload, dialog handling).
 
-## Environment facts
+## Local machine paths
 
-- Plugin checkout: `/Users/mgallo/repo/deepseek-chrome`.
-- Harness checkout: `/Users/mgallo/repo/deepseek-harness` (not owned by this
-  repo; read-only reference for the harness API/docs).
-- Harness docs that define the plugin contract:
-  `docs/user/develop/basic/{index,tool,config,publish}.md`,
-  `docs/cookbook/adding-a-tool.md`, and
-  `packages/core/tools/README.md` + `packages/interaction/commands/README.md`.
+Checkout paths are machine-specific and live in **`.env`** (gitignored;
+template: `.env.example`). Read it first — `source .env` in shell commands —
+and use its variables wherever a command needs a checkout path:
+
+- `DSH_CHROME_CHECKOUT` — this plugin checkout (the repo root).
+- `DSH_HARNESS_CHECKOUT` — the deepseek-harness checkout; not owned by this
+  repo, read-only reference for the harness API/docs. Also consumed by
+  `scripts/link-dev.mjs` via `node --env-file=.env`.
+- `dev.patch.yml` is likewise gitignored (it must embed an absolute path):
+  copy `dev.patch.yml.example` and substitute this checkout's path.
+
+Harness docs that define the plugin contract (under `$DSH_HARNESS_CHECKOUT`):
+`docs/user/develop/basic/{index,tool,config,publish}.md`,
+`docs/cookbook/adding-a-tool.md`, and
+`packages/core/tools/README.md` + `packages/interaction/commands/README.md`.
