@@ -1,0 +1,13 @@
+# Dev overlay: load the built plugin from source without installing a bundle.
+# The module path must be absolute (the loader does not rebase patch paths).
+# Build first: `pnpm build` (and `node scripts/link-dev.mjs <harness>` so the
+# plugin's @deepseek-ai/* and playwright-core imports resolve).
+#
+# Usage from the harness checkout:
+#   pnpm dsh web --patch /Users/mgallo/repo/deepseek-chrome/dev.patch.yml
+- insert:
+    - id: chrome
+      name: /Users/mgallo/repo/deepseek-chrome/lib/index.js
+      config:
+        channel: chrome
+        headless: false
