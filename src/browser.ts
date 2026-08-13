@@ -14,11 +14,32 @@ import type { Config } from './config.ts'
 /** Bounded history lengths for the debug collectors. */
 const MAX_CONSOLE = 200
 const MAX_NETWORK = 200
+/** Per-entry size cap so one noisy page cannot flood the collectors. */
+const MAX_ENTRY = 500
+
+function truncate(text: string): string {
+  return text.length > MAX_ENTRY ? `${text.slice(0, MAX_ENTRY)}…` : text
+}
+
+/** Local dev servers are almost always plain HTTP. */
+function isLocalHost(url: string): boolean {
+  const host = (url.split(/[/?#]/u, 1)[0] ?? '')
+    .replace(/:\d+$/u, '')
+    .replace(/^\[|\]$/gu, '')
+    .toLowerCase()
+  return host === 'localhost'
+    || host === '::1'
+    || host.endsWith('.localhost')
+    || host.endsWith('.local')
+    || host.startsWith('127.')
+}
 
 export class BrowserService {
   private browser: Browser | null = null
   private context: BrowserContext | null = null
   private currentPage: Page | null = null
+  private opening: Promise<Page> | null = null
+  private readonly wiredPages = new WeakSet<Page>()
   private readonly consoleMessages: string[] = []
   private readonly networkLog: string[] = []
 
@@ -36,7 +57,16 @@ export class BrowserService {
   /** Open (launch or connect) the browser and return the active page. */
   async open(): Promise<Page> {
     if (this.context !== null) return this.requirePage()
+    // Guard against concurrent openers (e.g. /chrome plus an auto-launching
+    // tool in the same turn): a second launch on the same userDataDir fails
+    // with "profile in use".
+    this.opening ??= this.doOpen().finally(() => {
+      this.opening = null
+    })
+    return this.opening
+  }
 
+  private async doOpen(): Promise<Page> {
     let context: BrowserContext
     if (this.config.connectEndpoint !== '') {
       const browser = await chromium.connectOverCDP(this.config.connectEndpoint)
@@ -60,10 +90,17 @@ export class BrowserService {
       this.browser = context.browser()
     }
     this.context = context
+    context.setDefaultTimeout(this.config.timeoutMs)
+    context.setDefaultNavigationTimeout(this.config.timeoutMs)
+
+    // Wire every existing page plus any page created later (popups via
+    // target=_blank, tabs the user opens in attach mode), so console/network
+    // collection and close bookkeeping cover the whole context.
+    context.on('page', (page) => this.wirePage(page))
+    for (const page of context.pages()) this.wirePage(page)
 
     const pages = context.pages()
     this.currentPage = pages.length > 0 ? pages[pages.length - 1]! : await context.newPage()
-    this.wirePage(this.currentPage)
     return this.currentPage
   }
 
@@ -77,6 +114,13 @@ export class BrowserService {
     throw new Error('Chrome is not open. Run /chrome or call the browser_open tool first.')
   }
 
+  /** Throw the standard model-recoverable error unless the browser is open. */
+  assertOpen(): void {
+    if (this.context === null) {
+      throw new Error('Chrome is not open. Run /chrome or call the browser_open tool first.')
+    }
+  }
+
   /** The active page; throws when closed. */
   page(): Page {
     if (this.currentPage === null || this.currentPage.isClosed()) {
@@ -85,13 +129,23 @@ export class BrowserService {
     return this.currentPage
   }
 
+  /** The active page, falling back to the last open tab; null when none. */
+  activePage(): Page | null {
+    if (this.currentPage !== null && !this.currentPage.isClosed()) return this.currentPage
+    const pages = this.pages()
+    return pages.length > 0 ? pages[pages.length - 1]! : null
+  }
+
   pages(): Page[] {
     return this.context?.pages() ?? []
   }
 
   async newPage(url?: string): Promise<Page> {
-    const context = this.context
-    if (context === null) throw new Error('Chrome is not open. Run /chrome or call the browser_open tool first.')
+    if (this.context === null) {
+      if (!this.config.autoLaunch) this.assertOpen()
+      await this.open()
+    }
+    const context = this.context!
     const page = await context.newPage()
     this.wirePage(page)
     if (url !== undefined && url !== '') await page.goto(this.normalizeUrl(url))
@@ -109,8 +163,7 @@ export class BrowserService {
   }
 
   async closePage(index?: number): Promise<void> {
-    const context = this.context
-    if (context === null) throw new Error('Chrome is not open. Run /chrome or call the browser_open tool first.')
+    this.assertOpen()
     const pages = this.pages()
     const target = index === undefined
       ? this.requirePage()
@@ -145,7 +198,8 @@ export class BrowserService {
   }
 
   normalizeUrl(url: string): string {
-    return /^https?:\/\//u.test(url) ? url : `https://${url}`
+    if (/^https?:\/\//u.test(url)) return url
+    return `${isLocalHost(url) ? 'http' : 'https'}://${url}`
   }
 
   private requirePage(): Page {
@@ -159,6 +213,9 @@ export class BrowserService {
   }
 
   private wirePage(page: Page): void {
+    // Pages arrive from both explicit wiring and the context 'page' event.
+    if (this.wiredPages.has(page)) return
+    this.wiredPages.add(page)
     page.on('close', () => {
       if (this.currentPage === page) {
         const remaining = this.pages()
@@ -166,16 +223,16 @@ export class BrowserService {
       }
     })
     page.on('console', (message) => {
-      this.consoleMessages.push(`[${message.type()}] ${message.text()}`)
+      this.consoleMessages.push(truncate(`[${message.type()}] ${message.text()}`))
       if (this.consoleMessages.length > MAX_CONSOLE) this.consoleMessages.shift()
     })
     page.on('response', (response) => {
       const request = response.request()
-      this.networkLog.push(`${request.method()} ${response.url()} -> ${response.status()}`)
+      this.networkLog.push(truncate(`${request.method()} ${response.url()} -> ${response.status()}`))
       if (this.networkLog.length > MAX_NETWORK) this.networkLog.shift()
     })
     page.on('requestfailed', (request) => {
-      this.networkLog.push(`${request.method()} ${request.url()} -> FAILED ${request.failure()?.errorText ?? ''}`)
+      this.networkLog.push(truncate(`${request.method()} ${request.url()} -> FAILED ${request.failure()?.errorText ?? ''}`))
       if (this.networkLog.length > MAX_NETWORK) this.networkLog.shift()
     })
   }
