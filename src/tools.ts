@@ -27,15 +27,39 @@ function normalizeRef(raw: string): string {
 }
 
 function resolveLocator(page: Page, args: TargetArgs): Locator {
+  const given = [args.ref, args.text, args.selector].filter((value) => value !== undefined && value !== '')
+  if (given.length !== 1) throw new Error('specify exactly one of: ref, text, or selector')
   if (args.ref !== undefined && args.ref !== '') return page.locator(`aria-ref=${normalizeRef(args.ref)}`)
   if (args.text !== undefined && args.text !== '') return page.getByText(args.text, { exact: true })
-  if (args.selector !== undefined && args.selector !== '') return page.locator(args.selector)
-  throw new Error('specify exactly one of: ref, text, or selector')
+  return page.locator(args.selector!)
 }
 
 const textRender = (_args: unknown, value: string): { type: 'text'; text: string }[] => [
   { type: 'text', text: value },
 ]
+
+/**
+ * Abort-aware delay for `browser_wait_for`: Playwright waits do not accept an
+ * AbortSignal, but a plain timer can be cancelled cooperatively.
+ */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted()
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      try {
+        signal.throwIfAborted()
+      } catch (error) {
+        reject(error)
+      }
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 /** Register every browser_* tool. */
 export function registerChromeTools(ctx: Context, browser: BrowserService): void {
@@ -46,9 +70,12 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       url: { type: 'string', description: 'Optional URL to navigate to once open.' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.open()
-      if (args.url !== undefined && args.url !== '') await page.goto(browser.normalizeUrl(args.url))
+      if (args.url !== undefined && args.url !== '') {
+        await page.goto(browser.normalizeUrl(args.url), { waitUntil: 'domcontentloaded' })
+      }
       return `Chrome is open at ${page.url()}. Use browser_snapshot to inspect the page.`
     },
   }))
@@ -60,7 +87,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       url: { type: 'string', required: true, description: 'Full URL or bare domain (https:// is added).' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       await page.goto(browser.normalizeUrl(args.url), { waitUntil: 'domcontentloaded' })
       return `Navigated to ${page.url()}.`
@@ -72,7 +100,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
     description: 'Capture the accessibility tree of the current page as text with clickable element refs. This is the primary way to read a page.',
     parameters: {},
     output: { schema: { type: 'string' }, render: textRender },
-    async execute() {
+    async execute(_args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       const snapshot = await page.locator('body').ariaSnapshot({ mode: 'ai' }).catch(() => null)
       if (snapshot === null || snapshot === '') {
@@ -91,7 +120,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       selector: { type: 'string', description: 'CSS selector.' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       await resolveLocator(page, args).first().click()
       return `Clicked. URL: ${page.url()}.`
@@ -108,7 +138,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       keys: { type: 'string', required: true, description: 'Text to type, char by char.' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       await resolveLocator(page, args).first().pressSequentially(args.keys)
       return `Typed ${args.keys.length} character(s).`
@@ -120,11 +151,13 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
     description: 'Fill an input/textarea/select with a value, replacing its current content.',
     parameters: {
       ref: { type: 'string' },
+      text: { type: 'string' },
       selector: { type: 'string' },
       value: { type: 'string', required: true, description: 'Value to fill.' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       await resolveLocator(page, args).first().fill(args.value)
       return `Filled the field.`
@@ -138,7 +171,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       key: { type: 'string', required: true, description: 'Key name or combo (Playwright keyboard.press syntax).' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       await page.keyboard.press(args.key)
       return `Pressed ${args.key}.`
@@ -168,7 +202,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
         text: `Screenshot saved to ${value.path} (${value.width}x${value.height}, ${value.bytes} bytes). Use browser_snapshot for a text view of the page.`,
       }],
     },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       const buffer = await page.screenshot({ type: 'png', fullPage: args.fullPage ?? false })
       const dir = join(homedir(), '.dsh', 'chrome-screenshots')
@@ -179,8 +214,12 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       const file = base.endsWith('.png') ? base : `${base}.png`
       const path = join(dir, file)
       await writeFile(path, buffer)
-      const size = page.viewportSize()
-      return { path, width: size?.width ?? 0, height: size?.height ?? 0, bytes: buffer.length }
+      // PNG header: 8-byte signature + IHDR length (4) + "IHDR" (4), then
+      // width/height as big-endian uint32. Read the real image size so
+      // full-page captures do not report the viewport dimensions.
+      const width = buffer.length >= 24 ? buffer.readUInt32BE(16) : 0
+      const height = buffer.length >= 24 ? buffer.readUInt32BE(20) : 0
+      return { path, width, height, bytes: buffer.length }
     },
   }))
 
@@ -192,14 +231,15 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       ms: { type: 'number', description: 'Wait this many milliseconds.' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       if (args.text !== undefined && args.text !== '') {
         await page.getByText(args.text, { exact: true }).first().waitFor({ state: 'visible' })
         return `Text "${args.text}" is now visible.`
       }
       const ms = args.ms ?? 1000
-      await page.waitForTimeout(ms)
+      await abortableDelay(ms, exec.signal)
       return `Waited ${ms}ms.`
     },
   }))
@@ -211,7 +251,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       expression: { type: 'string', required: true, description: 'JS expression whose value is returned (e.g. document.title).' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       const outcome = await page.evaluate((expression: string): { ok: boolean; text: string } => {
         try {
@@ -244,7 +285,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       const page = await browser.ensure()
       if (args.action === 'back') await page.goBack()
       else if (args.action === 'forward') await page.goForward()
@@ -267,7 +309,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       index: { type: 'number', description: 'Zero-based tab index (actions: close, switch).' },
     },
     output: { schema: { type: 'string' }, render: textRender },
-    async execute(args) {
+    async execute(args, exec) {
+      exec.signal.throwIfAborted()
       if (args.action === 'new') {
         const page = await browser.newPage(args.url)
         return `Opened tab ${browser.pages().indexOf(page)}: ${page.url()}.`
@@ -277,15 +320,21 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
         return 'Closed the tab.'
       }
       if (args.action === 'switch') {
-        const page = await browser.switchToPage(args.index ?? 0)
-        return `Switched to tab ${args.index ?? 0}: ${page.url()}.`
+        if (args.index === undefined) {
+          throw new Error('browser_tabs switch requires the index parameter (run browser_tabs list first).')
+        }
+        const page = await browser.switchToPage(args.index)
+        return `Switched to tab ${args.index}: ${page.url()}.`
       }
-      const current = browser.page()
-      const lines = browser.pages().map((page, index) => {
+      browser.assertOpen()
+      const current = browser.activePage()
+      const lines = await Promise.all(browser.pages().map(async (page, index) => {
         const marker = page === current ? '*' : ' '
-        const title = page.title() ?? ''
+        // page.title() is async: awaiting also turns closed-page failures
+        // into an empty title instead of an unhandled rejection.
+        const title = await page.title().catch(() => '')
         return `${marker}[${index}] ${title} — ${page.url()}`
-      })
+      }))
       return lines.length === 0 ? 'No tabs open.' : lines.join('\n')
     },
   }))
@@ -295,7 +344,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
     description: 'Return recent browser console messages from the current session.',
     parameters: {},
     output: { schema: { type: 'string' }, render: textRender },
-    async execute() {
+    async execute(_args, exec) {
+      exec.signal.throwIfAborted()
       await browser.ensure()
       const lines = browser.console().slice(-50)
       return lines.length === 0 ? 'No console messages captured.' : lines.join('\n')
@@ -307,7 +357,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
     description: 'Return recent network requests and their status codes from the current session.',
     parameters: {},
     output: { schema: { type: 'string' }, render: textRender },
-    async execute() {
+    async execute(_args, exec) {
+      exec.signal.throwIfAborted()
       await browser.ensure()
       const lines = browser.network().slice(-50)
       return lines.length === 0 ? 'No network requests captured.' : lines.join('\n')
@@ -319,7 +370,8 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
     description: 'Close the Chrome session.',
     parameters: {},
     output: { schema: { type: 'string' }, render: textRender },
-    async execute() {
+    async execute(_args, exec) {
+      exec.signal.throwIfAborted()
       await browser.close()
       return 'Chrome closed.'
     },

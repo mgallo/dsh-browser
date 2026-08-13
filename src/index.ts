@@ -31,7 +31,7 @@ export function apply(ctx: Context, config: Config): void {
       const url = rawInput.trim()
       try {
         const page = await browser.open()
-        if (url !== '') await page.goto(browser.normalizeUrl(url))
+        if (url !== '') await page.goto(browser.normalizeUrl(url), { waitUntil: 'domcontentloaded' })
         const current = page.url()
         agent.steer(createUserMessage({
           content: [{
