@@ -246,17 +246,28 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
 
   ctx.tools.register(defineTool({
     name: 'browser_evaluate',
-    description: 'Evaluate a JavaScript expression in the page and return the JSON-serialized result.',
+    description: 'Evaluate JavaScript in the page and return the JSON-serialized result.',
     parameters: {
-      expression: { type: 'string', required: true, description: 'JS expression whose value is returned (e.g. document.title).' },
+      expression: { type: 'string', required: true, description: 'JS expression (e.g. document.title) or statements with an explicit return.' },
     },
     output: { schema: { type: 'string' }, render: textRender },
     async execute(args, exec) {
       exec.signal.throwIfAborted()
       const page = await browser.ensure()
-      const outcome = await page.evaluate((expression: string): { ok: boolean; text: string } => {
+      const outcome = await page.evaluate((source: string): { ok: boolean; text: string } => {
         try {
-          const value = Function(`"use strict"; return (${expression})`)() as unknown
+          // Prefer the expression form (its value is the result); when it
+          // does not parse — e.g. statements with ';' — treat the input as a
+          // function body, where an explicit return provides the value.
+          // Construction is separate from invocation so a SyntaxError thrown
+          // by the page code itself does not trigger a bogus retry.
+          let fn: () => unknown
+          try {
+            fn = Function(`"use strict"; return (${source})`) as () => unknown
+          } catch {
+            fn = Function(`"use strict"; ${source}`) as () => unknown
+          }
+          const value = fn()
           if (value === undefined) return { ok: true, text: 'undefined' }
           let serialized: string
           try {
