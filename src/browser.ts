@@ -198,7 +198,11 @@ export class BrowserService {
   }
 
   normalizeUrl(url: string): string {
-    if (/^https?:\/\//u.test(url)) return url
+    // Anything already carrying a scheme — https?://, scheme://, and
+    // scheme-only forms like about:blank, data:, file: — passes through.
+    // ('localhost:1420' only looks like a scheme; what follows is a port.)
+    if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(url)) return url
+    if (/^(?:about|chrome|chrome-extension|chrome-untrusted|data|blob|file|view-source):/iu.test(url)) return url
     return `${isLocalHost(url) ? 'http' : 'https'}://${url}`
   }
 
