@@ -7,13 +7,19 @@
  * Usage:  node scripts/link-dev.mjs /path/to/deepseek-harness
  *         (defaults to ../deepseek-harness)
  */
-import { mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readlinkSync, rmSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
 const harness = resolve(process.argv[2] ?? join(root, '..', 'deepseek-harness'))
+
+if (!existsSync(harness)) {
+  console.error(`Harness checkout not found at ${harness}.`)
+  console.error('Pass its path explicitly: node scripts/link-dev.mjs /path/to/deepseek-harness')
+  process.exit(1)
+}
 
 const links = {
   '@deepseek-ai/cordis': 'vendor/cordis',
@@ -42,6 +48,11 @@ for (const [name, target] of Object.entries(links)) link(name, target)
 // playwright-core, @types/node, tsdown, and typescript live in pnpm's isolated
 // store; resolve any installed version by scanning the store directory names.
 const pnpmStore = join(harness, 'node_modules', '.pnpm')
+if (!existsSync(pnpmStore)) {
+  console.error(`No pnpm store at ${pnpmStore}.`)
+  console.error('Run `pnpm install` in the harness checkout first.')
+  process.exit(1)
+}
 const storeEntries = readdirSync(pnpmStore)
 
 const pwDir = storeEntries.find(name => name.startsWith('playwright-core@'))

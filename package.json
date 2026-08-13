@@ -27,7 +27,6 @@
     "@deepseek-ai/schemastery": "*",
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/dsh-commands": "*",
-    "@deepseek-ai/dsh-agent": "*",
     "@deepseek-ai/dsh-llm": "*"
   },
   "devDependencies": {
