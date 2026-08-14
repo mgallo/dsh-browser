@@ -5,10 +5,11 @@
 # so the plugin's @deepseek-ai/* and playwright-core imports resolve).
 #
 # Usage from the harness checkout:
-#   pnpm dsh web --patch /path/to/deepseek-chrome/dev.patch.yml
+#   pnpm dsh web --patch /path/to/dsh-browser/dev.patch.yml
 - insert:
-    - id: chrome
-      name: /path/to/deepseek-chrome/lib/index.js
+    - id: browser
+      name: /path/to/dsh-browser/lib/index.js
       config:
-        channel: chrome
+        browserType: chromium
+        channel: ''
         headless: false

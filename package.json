@@ -1,7 +1,7 @@
 {
-  "name": "dsh-chrome",
+  "name": "dsh-browser",
   "version": "0.1.0",
-  "description": "Chrome browser control for DeepSeek Harness: a /chrome command plus browser_* tools over CDP.",
+  "description": "Browser control for DeepSeek Harness: a /browser command plus browser_* tools over CDP (Chrome by default).",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

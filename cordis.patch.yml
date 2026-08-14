@@ -1,16 +1,19 @@
-# dsh-chrome bundle layer: mounts the browser-control plugin beside the base
+# dsh-browser bundle layer: mounts the browser-control plugin beside the base
 # composition. The row references the installed package by name so Node
 # resolution finds it through the profile's node_modules.
 - insert:
-    - id: chrome
-      name: dsh-chrome
+    - id: browser
+      name: dsh-browser
       config:
-        # Launch Google Chrome (channel: 'chrome'); set to '' to use Playwright's
-        # bundled Chromium instead (requires the `playwright` package browsers).
-        channel: chrome
+        # Browser engine: chromium | firefox | webkit.
+        browserType: chromium
+        # Playwright browser channel (chrome, msedge, chromium, …). Empty = the
+        # engine default: the system Google Chrome for `chromium` — the fallback
+        # when nothing else is specified.
+        channel: ''
         headless: false
         # Set to an http://127.0.0.1:9222 endpoint to attach to an existing
-        # Chrome started with --remote-debugging-port=9222 instead of launching.
+        # Chromium started with --remote-debugging-port=9222 instead of launching.
         connectEndpoint: ''
-        # Browser tools auto-launch Chrome when none is open.
+        # Browser tools auto-launch the browser when none is open.
         autoLaunch: true

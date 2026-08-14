@@ -1,9 +1,12 @@
 /**
  * Plugin configuration, validated by Schemastery before `apply` runs.
- * @module dsh-chrome/config
+ * @module dsh-browser/config
  */
 
 import Schema from '@deepseek-ai/schemastery'
+
+/** Browser engine families Playwright can drive. */
+export type BrowserEngine = 'chromium' | 'firefox' | 'webkit'
 
 /** Browser viewport for freshly created contexts. */
 export interface Viewport {
@@ -12,17 +15,19 @@ export interface Viewport {
 }
 
 export interface Config {
-  /** Playwright browser channel (e.g. `chrome`, `msedge`, `chromium`). */
+  /** Browser engine family: `chromium`, `firefox`, or `webkit`. */
+  browserType: BrowserEngine
+  /** Playwright browser channel (e.g. `chrome`, `msedge`, `chromium`); empty selects the engine default (system Google Chrome for `chromium`). */
   channel: string
   /** Run without a visible window. */
   headless: boolean
   /** Absolute path to a browser executable; empty selects the channel default. */
   executablePath: string
-  /** Persistent profile directory; empty uses `~/.dsh/chrome-profile`. */
+  /** Persistent profile directory; empty uses `~/.dsh/browser-profile`. */
   userDataDir: string
-  /** CDP endpoint (e.g. `http://127.0.0.1:9222`); empty means launch instead of connect. */
+  /** CDP endpoint (Chromium only, e.g. `http://127.0.0.1:9222`); empty means launch instead of connect. */
   connectEndpoint: string
-  /** Browser tools auto-launch Chrome when none is open. */
+  /** Browser tools auto-launch the browser when none is open. */
   autoLaunch: boolean
   viewport: Viewport
   /** Default per-action timeout in milliseconds. */
@@ -30,7 +35,8 @@ export interface Config {
 }
 
 export const Config: Schema<Config> = Schema.object({
-  channel: Schema.string().default('chrome'),
+  browserType: Schema.union(['chromium', 'firefox', 'webkit'] as const).default('chromium'),
+  channel: Schema.string().default(''),
   headless: Schema.boolean().default(false),
   executablePath: Schema.string().default(''),
   userDataDir: Schema.string().default(''),

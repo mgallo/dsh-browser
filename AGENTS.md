@@ -1,4 +1,4 @@
-# AGENTS.md — dsh-chrome
+# AGENTS.md — dsh-browser
 
 Guidance for AI agents working on this repository. Read this before changing
 anything; it encodes the harness integration contract and the pitfalls that
@@ -6,17 +6,18 @@ were already paid for once.
 
 ## What this is
 
-`dsh-chrome` is an out-of-tree **bundle plugin for
+`dsh-browser` is an out-of-tree **bundle plugin for
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)**. It gives
 a harness agent browser control the way Claude Code's `/chrome` does: a
-`/chrome` slash command plus a set of model-facing `browser_*` tools.
+`/browser` slash command plus a set of model-facing `browser_*` tools.
 
 - Runtime: a single Node ESM bundle (`lib/index.js`) produced by `tsdown`.
 - Mechanism: `playwright-core` over the **Chrome DevTools Protocol (CDP)**.
-  It launches the user's real Google Chrome (`chromium.launchPersistentContext`
-  with `channel: 'chrome'`) or attaches to an already-running one via
-  `connectOverCDP`.
-- **No Chrome extension is needed.** An extension would only be required to
+  It launches Google Chrome by default (`chromium.launchPersistentContext`
+  with `channel: 'chrome'`), or any Chromium/Firefox/WebKit browser selected
+  via `browserType` / `channel` / `executablePath`; it can also attach to an
+  already-running Chromium via `connectOverCDP`.
+- **No browser extension is needed.** An extension would only be required to
   drive the user's *existing* browser session (their open tabs / log-ins);
   that is deferred roadmap work.
 
@@ -27,11 +28,11 @@ repo).
 ## Layout
 
 ```
-src/index.ts        apply(ctx, config): mounts BrowserService, registers /chrome + tools
-src/browser.ts      BrowserService — Playwright/CDP lifecycle, tabs, console/network collectors
+src/index.ts        apply(ctx, config): mounts BrowserService, registers /browser + tools
+src/browser.ts      BrowserService — Playwright browser lifecycle (engine selection), tabs, console/network collectors
 src/tools.ts        the 15 browser_* tool definitions (defineTool)
-src/config.ts       Config interface + Schemastery schema (all fields have defaults)
-cordis.patch.yml    bundle layer: inserts row `name: dsh-chrome` (the installed package)
+src/config.ts       Config interface + Schemastery schema (browserType + all defaults)
+cordis.patch.yml    bundle layer: inserts row `name: dsh-browser` (the installed package)
 dev.patch.yml       dev overlay (--patch flow); gitignored, copied from dev.patch.yml.example
 tsconfig.json       typecheck config (moduleResolution: bundler; see "Typecheck")
 tsdown.config.ts    build config (ESM bundle, externals kept external)
@@ -46,7 +47,7 @@ A harness plugin is a module with **named exports only** — the Loader's
 export breaks it. Our bundle emits `export { Config, apply, inject, name }`
 (verified: no `default`).
 
-- `export const name = 'dsh-chrome'`
+- `export const name = 'dsh-browser'`
 - `export const inject = ['tools', 'commands']` — the plugin stays PENDING until
   those services exist; order in `cordis.yml` does not matter.
 - `export function apply(ctx, config)` — registers everything; registrations are
@@ -71,10 +72,16 @@ ctx.tools.register(defineTool({
 
 ```ts
 ctx.commands.register({
-  name: 'chrome', description, input: { hint: '[url]' },
+  name: 'browser', description, input: { hint: '[browser] [url]' },
   handler: async ({ agent, rawInput }): Promise<CommandResult> => { ... },
 })
 ```
+
+`/browser` accepts an optional leading browser alias (`chrome`, `chromium`,
+`edge`/`msedge`, `firefox`, `webkit`); without it the configured default (Chrome)
+is used. `browser.ts` exports `resolveBrowserAlias` for the lookup, and
+`BrowserService.open(override)` switches browsers (closing the current one,
+using a per-browser profile dir under `~/.dsh/browser-profile/`).
 
 To make the agent act after a command, use `agent.steer(createUserMessage({...}))`
 (from `@deepseek-ai/dsh-llm`) — this is what `dsh-plan-mode` does.
@@ -97,7 +104,7 @@ To make the agent act after a command, use `agent.steer(createUserMessage({...})
 DeepSeek models are **text-only**. `browser_snapshot` returns
 `page.locator('body').ariaSnapshot({ mode: 'ai' })` — a YAML-like accessibility
 tree with element refs `[ref=eN]`. That text is the model's primary "eyes".
-Screenshots are written to `~/.dsh/chrome-screenshots/` for the human; inline
+Screenshots are written to `~/.dsh/browser-screenshots/` for the human; inline
 image blocks (`ctx.attachments` → `ImageBlock`) are a future multimodal
 enhancement.
 
@@ -152,14 +159,14 @@ Two ways — both require a **restart** of the running `dsh web` process.
 1. **Bundle (persistent).** Add the plugin to the GUI profile and boot it:
 
    ```sh
-   dsh plugin --profile web add "$DSH_CHROME_CHECKOUT"
+   dsh plugin --profile web add "$DSH_BROWSER_CHECKOUT"
    dsh web
    ```
 
 2. **`--patch` overlay (dev iteration):**
 
    ```sh
-   pnpm dsh web --patch "$DSH_CHROME_CHECKOUT/dev.patch.yml"
+   pnpm dsh web --patch "$DSH_BROWSER_CHECKOUT/dev.patch.yml"
    ```
 
 ## CLI / profile gotchas
@@ -181,23 +188,23 @@ Two ways — both require a **restart** of the running `dsh web` process.
   closure). Do not add them as `dependencies`.
 - `playwright-core` is a real `dependency` (pinned), installed by pnpm into the
   profile. Use `playwright-core`, **not** `playwright`: no browser download, no
-  postinstall, no pnpm `strictDepBuilds` friction. The browser is the system
-  Chrome via `channel: 'chrome'`.
+  postinstall, no pnpm `strictDepBuilds` friction. The default browser is the system
+  Chrome via `channel: 'chrome'`; select other engines with `browserType`.
 
 ## Conventions
 
 - Host-only (Node) plugin; no client/browser bundle.
-- Keep tool names `browser_*`; keep the `/chrome` command name reserved for this
+- Keep tool names `browser_*`; keep the `/browser` command reserved for this
   plugin.
 - Fail loudly and readably: tools throw messages the model can recover from
-  ("Chrome is not open. Run /chrome or call the browser_open tool first.").
+  ("Chrome is not open. Run /browser or call the browser_open tool first.").
 - Bounded collectors (console/network capped at 200 entries).
 
 ## Verification checklist for a change
 
 1. `pnpm typecheck` clean.
 2. `pnpm build` clean.
-3. Smoke test above lists 15 tools + `/chrome`.
+3. Smoke test above lists 15 tools + `/browser`.
 4. If the change touches tool schemas, the smoke test (which runs real
    `defineTool` compilation) must not throw.
 5. Optional real check: load via `--patch`, then `browser_navigate` +
@@ -215,7 +222,7 @@ Checkout paths are machine-specific and live in **`.env`** (gitignored;
 template: `.env.example`). Read it first — `source .env` in shell commands —
 and use its variables wherever a command needs a checkout path:
 
-- `DSH_CHROME_CHECKOUT` — this plugin checkout (the repo root).
+- `DSH_BROWSER_CHECKOUT` — this plugin checkout (the repo root).
 - `DSH_HARNESS_CHECKOUT` — the deepseek-harness checkout; not owned by this
   repo, read-only reference for the harness API/docs. Also consumed by
   `scripts/link-dev.mjs` via `node --env-file=.env`.

@@ -1,15 +1,105 @@
 /**
- * Playwright/CDP browser session: launch a dedicated Chrome or attach to a
- * running one, and expose the active page plus tab/console/network state to
- * the tool layer. The owning plugin's fiber closes the browser on unload.
- * @module dsh-chrome/browser
+ * Playwright browser session: launch a dedicated browser (Google Chrome by
+ * default, or any Chromium/Firefox/WebKit engine) or attach to a running
+ * Chromium over CDP, and expose the active page plus tab/console/network
+ * state to the tool layer. The owning plugin's fiber closes the browser on
+ * unload.
+ * @module dsh-browser/browser
  */
 
 import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
+import { basename, join } from 'node:path'
+import {
+  chromium,
+  firefox,
+  webkit,
+  type Browser,
+  type BrowserContext,
+  type BrowserType,
+  type Page,
+} from 'playwright-core'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Config } from './config.ts'
+import type { BrowserEngine, Config } from './config.ts'
+
+/** A concrete browser selection: engine + channel + optional binary path. */
+export interface BrowserSpec {
+  browserType: BrowserEngine
+  channel: string
+  executablePath: string
+}
+
+/** Browser engines selectable by `browserType`. */
+const ENGINES: Record<BrowserEngine, BrowserType> = { chromium, firefox, webkit }
+
+/** Friendly names for common browser executables (matched by basename). */
+const EXECUTABLE_LABELS: Record<string, string> = {
+  'Brave Browser': 'Brave',
+  'Google Chrome': 'Chrome',
+  Chromium: 'Chromium',
+  'Microsoft Edge': 'Edge',
+  Firefox: 'Firefox',
+  firefox: 'Firefox',
+  MiniBrowser: 'WebKit',
+}
+
+/** Friendly display names for the common Playwright channels. */
+const CHANNEL_LABELS: Record<string, string> = {
+  chrome: 'Chrome',
+  'chrome-beta': 'Chrome Beta',
+  'chrome-dev': 'Chrome Dev',
+  'chrome-canary': 'Chrome Canary',
+  msedge: 'Edge',
+  'msedge-beta': 'Edge Beta',
+  'msedge-dev': 'Edge Dev',
+  'msedge-canary': 'Edge Canary',
+  chromium: 'Chromium',
+  firefox: 'Firefox',
+  'firefox-beta': 'Firefox Beta',
+  'firefox-dev': 'Firefox Dev',
+  'firefox-nightly': 'Firefox Nightly',
+  webkit: 'WebKit',
+}
+
+/**
+ * Short aliases accepted by `/browser <browser>`, resolved to a spec. Channel
+ * based only: browsers that require an `executablePath` (e.g. Brave) are set
+ * in config, not the shortcut. Safari (Apple's app) is not drivable by
+ * Playwright and has no alias.
+ */
+const BROWSER_ALIASES: Record<string, BrowserSpec> = {
+  chrome: { browserType: 'chromium', channel: 'chrome', executablePath: '' },
+  chromium: { browserType: 'chromium', channel: 'chromium', executablePath: '' },
+  edge: { browserType: 'chromium', channel: 'msedge', executablePath: '' },
+  msedge: { browserType: 'chromium', channel: 'msedge', executablePath: '' },
+  firefox: { browserType: 'firefox', channel: '', executablePath: '' },
+  webkit: { browserType: 'webkit', channel: '', executablePath: '' },
+}
+
+/** Resolve a `/browser` alias token (lowercase) to a spec, or null. */
+export function resolveBrowserAlias(name: string): BrowserSpec | null {
+  return BROWSER_ALIASES[name] ?? null
+}
+
+/** All accepted `/browser` alias tokens. */
+export function browserAliases(): string[] {
+  return Object.keys(BROWSER_ALIASES)
+}
+
+/** Resolve the effective Playwright channel; system Chrome is the default. */
+function resolveChannel(spec: BrowserSpec): string | undefined {
+  if (spec.channel !== '') return spec.channel
+  return spec.browserType === 'chromium' ? 'chrome' : undefined
+}
+
+/** Human-readable name for a spec, e.g. "Chrome", "Edge", "Brave", "Firefox". */
+function labelFor(spec: BrowserSpec): string {
+  if (spec.executablePath !== '') {
+    const base = basename(spec.executablePath).replace(/\.exe$/iu, '')
+    return EXECUTABLE_LABELS[base] ?? base
+  }
+  const channel = spec.channel !== '' ? spec.channel : spec.browserType === 'chromium' ? 'chrome' : spec.browserType
+  return CHANNEL_LABELS[channel] ?? CHANNEL_LABELS[spec.browserType] ?? 'Browser'
+}
 
 /** Bounded history lengths for the debug collectors. */
 const MAX_CONSOLE = 200
@@ -39,6 +129,7 @@ export class BrowserService {
   private context: BrowserContext | null = null
   private currentPage: Page | null = null
   private opening: Promise<Page> | null = null
+  private currentSpec: BrowserSpec | null = null
   private readonly wiredPages = new WeakSet<Page>()
   private readonly consoleMessages: string[] = []
   private readonly networkLog: string[] = []
@@ -50,45 +141,98 @@ export class BrowserService {
     ctx.effect(() => () => this.close())
   }
 
+  /** Human-readable name of the current browser (or the configured default). */
+  get label(): string {
+    return labelFor(this.currentSpec ?? this.baseSpec())
+  }
+
   get isOpen(): boolean {
     return this.context !== null
   }
 
   /** Open (launch or connect) the browser and return the active page. */
-  async open(): Promise<Page> {
-    if (this.context !== null) return this.requirePage()
-    // Guard against concurrent openers (e.g. /chrome plus an auto-launching
+  async open(override?: Partial<BrowserSpec>): Promise<Page> {
+    if (this.context !== null) {
+      // No explicit override (e.g. a browser_* tool): reuse whichever browser
+      // is already open rather than falling back to the configured default.
+      if (override === undefined) return this.requirePage()
+      const requested = this.resolveSpec(override)
+      // Same browser already open: reuse it. Switching browsers closes the
+      // current one first (a session holds exactly one browser, and distinct
+      // browsers must not share a user-data dir).
+      if (this.specKey(requested) === this.specKey(this.currentSpec!)) return this.requirePage()
+      await this.close()
+    }
+    const spec = this.resolveSpec(override)
+    // Guard against concurrent openers (e.g. /browser plus an auto-launching
     // tool in the same turn): a second launch on the same userDataDir fails
     // with "profile in use".
-    this.opening ??= this.doOpen().finally(() => {
+    this.opening ??= this.doOpen(spec).finally(() => {
       this.opening = null
     })
     return this.opening
   }
 
-  private async doOpen(): Promise<Page> {
+  /**
+   * Open the configured default browser, switching away from any other open
+   * browser. This is what `/browser` does when no browser argument is given:
+   * fall back to the default (Chrome, unless configured otherwise).
+   */
+  async openDefault(): Promise<Page> {
+    return this.open(this.baseSpec())
+  }
+
+  private baseSpec(): BrowserSpec {
+    return {
+      browserType: this.config.browserType,
+      channel: this.config.channel,
+      executablePath: this.config.executablePath,
+    }
+  }
+
+  private resolveSpec(override?: Partial<BrowserSpec>): BrowserSpec {
+    const base = this.baseSpec()
+    return {
+      browserType: override?.browserType ?? base.browserType,
+      channel: override?.channel ?? base.channel,
+      executablePath: override?.executablePath ?? base.executablePath,
+    }
+  }
+
+  private specKey(spec: BrowserSpec): string {
+    return `${spec.browserType}|${resolveChannel(spec) ?? ''}|${spec.executablePath}`
+  }
+
+  private async doOpen(spec: BrowserSpec): Promise<Page> {
     let context: BrowserContext
     if (this.config.connectEndpoint !== '') {
-      const browser = await chromium.connectOverCDP(this.config.connectEndpoint)
+      if (spec.browserType !== 'chromium') {
+        throw new Error(
+          `attach mode (connectEndpoint) is only supported for the chromium engine, not "${spec.browserType}". Clear connectEndpoint to launch ${labelFor(spec)} instead.`,
+        )
+      }
+      const browser = await ENGINES.chromium.connectOverCDP(this.config.connectEndpoint)
       const existing = browser.contexts()[0]
       if (existing === undefined) {
-        throw new Error('connected to Chrome over CDP but found no browser context')
+        throw new Error(`connected to ${labelFor(spec)} over CDP but found no browser context`)
       }
       this.browser = browser
       context = existing
     } else {
       const userDataDir = this.config.userDataDir !== ''
         ? this.config.userDataDir
-        : join(homedir(), '.dsh', 'chrome-profile')
-      context = await chromium.launchPersistentContext(userDataDir, {
-        channel: this.config.channel,
+        : this.defaultUserDataDir(spec)
+      const channel = resolveChannel(spec)
+      context = await ENGINES[spec.browserType].launchPersistentContext(userDataDir, {
+        ...(channel !== undefined ? { channel } : {}),
         headless: this.config.headless,
-        ...(this.config.executablePath !== '' ? { executablePath: this.config.executablePath } : {}),
+        ...(spec.executablePath !== '' ? { executablePath: spec.executablePath } : {}),
         viewport: this.config.viewport,
         timeout: this.config.timeoutMs,
       })
       this.browser = context.browser()
     }
+    this.currentSpec = spec
     this.context = context
     context.setDefaultTimeout(this.config.timeoutMs)
     context.setDefaultNavigationTimeout(this.config.timeoutMs)
@@ -104,6 +248,14 @@ export class BrowserService {
     return this.currentPage
   }
 
+  /** Default per-browser profile dir so distinct browsers never collide. */
+  private defaultUserDataDir(spec: BrowserSpec): string {
+    const name = spec.executablePath !== ''
+      ? basename(spec.executablePath).replace(/[^a-zA-Z0-9._-]/gu, '_').toLowerCase()
+      : (resolveChannel(spec) ?? spec.browserType)
+    return join(homedir(), '.dsh', 'browser-profile', name)
+  }
+
   /**
    * Return the active page, auto-launching when allowed. Throws a
    * model-recoverable message when the browser is closed.
@@ -111,20 +263,20 @@ export class BrowserService {
   async ensure(): Promise<Page> {
     if (this.context !== null) return this.requirePage()
     if (this.config.autoLaunch) return this.open()
-    throw new Error('Chrome is not open. Run /chrome or call the browser_open tool first.')
+    throw new Error(`${this.label} is not open. Run /browser or call the browser_open tool first.`)
   }
 
   /** Throw the standard model-recoverable error unless the browser is open. */
   assertOpen(): void {
     if (this.context === null) {
-      throw new Error('Chrome is not open. Run /chrome or call the browser_open tool first.')
+      throw new Error(`${this.label} is not open. Run /browser or call the browser_open tool first.`)
     }
   }
 
   /** The active page; throws when closed. */
   page(): Page {
     if (this.currentPage === null || this.currentPage.isClosed()) {
-      throw new Error('Chrome is not open. Run /chrome or call the browser_open tool first.')
+      throw new Error(`${this.label} is not open. Run /browser or call the browser_open tool first.`)
     }
     return this.currentPage
   }
@@ -182,6 +334,7 @@ export class BrowserService {
     this.context = null
     this.currentPage = null
     this.browser = null
+    this.currentSpec = null
     this.consoleMessages.length = 0
     this.networkLog.length = 0
     // Closing the persistent context (or CDP connection) shuts the session down.
@@ -202,7 +355,7 @@ export class BrowserService {
     // scheme-only forms like about:blank, data:, file: — passes through.
     // ('localhost:1420' only looks like a scheme; what follows is a port.)
     if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(url)) return url
-    if (/^(?:about|chrome|chrome-extension|chrome-untrusted|data|blob|file|view-source):/iu.test(url)) return url
+    if (/^(?:about|chrome|chrome-extension|chrome-untrusted|edge|moz-extension|data|blob|file|view-source):/iu.test(url)) return url
     return `${isLocalHost(url) ? 'http' : 'https'}://${url}`
   }
 
@@ -213,7 +366,7 @@ export class BrowserService {
       this.currentPage = pages[pages.length - 1]!
       return this.currentPage
     }
-    throw new Error('no pages are open in Chrome')
+    throw new Error(`no pages are open in ${this.label}`)
   }
 
   private wirePage(page: Page): void {

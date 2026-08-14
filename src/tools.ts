@@ -1,9 +1,9 @@
 /**
  * Model-facing browser tools registered with the harness tool registry.
  * Every tool operates on the shared {@link BrowserService} and returns a clear
- * error when Chrome is not open, so the model can recover by running `/chrome`
- * or calling `browser_open`.
- * @module dsh-chrome/tools
+ * error when the browser is not open, so the model can recover by running
+ * `/browser` or calling `browser_open`.
+ * @module dsh-browser/tools
  */
 
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -62,10 +62,10 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /** Register every browser_* tool. */
-export function registerChromeTools(ctx: Context, browser: BrowserService): void {
+export function registerBrowserTools(ctx: Context, browser: BrowserService): void {
   ctx.tools.register(defineTool({
     name: 'browser_open',
-    description: 'Open Chrome (launch or connect via CDP) so other browser tools can control it.',
+    description: 'Open the browser (launch or connect via CDP) so other browser tools can control it.',
     parameters: {
       url: { type: 'string', description: 'Optional URL to navigate to once open.' },
     },
@@ -76,7 +76,7 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       if (args.url !== undefined && args.url !== '') {
         await page.goto(browser.normalizeUrl(args.url), { waitUntil: 'domcontentloaded' })
       }
-      return `Chrome is open at ${page.url()}. Use browser_snapshot to inspect the page.`
+      return `${browser.label} is open at ${page.url()}. Use browser_snapshot to inspect the page.`
     },
   }))
 
@@ -181,7 +181,7 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
 
   ctx.tools.register(defineTool({
     name: 'browser_screenshot',
-    description: 'Capture a PNG screenshot of the current page and save it under ~/.dsh/chrome-screenshots.',
+    description: 'Capture a PNG screenshot of the current page and save it under ~/.dsh/browser-screenshots.',
     parameters: {
       name: { type: 'string', description: 'Optional base filename (without .png).' },
       fullPage: { type: 'boolean', description: 'Capture the full scrollable page.' },
@@ -206,7 +206,7 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
       exec.signal.throwIfAborted()
       const page = await browser.ensure()
       const buffer = await page.screenshot({ type: 'png', fullPage: args.fullPage ?? false })
-      const dir = join(homedir(), '.dsh', 'chrome-screenshots')
+      const dir = join(homedir(), '.dsh', 'browser-screenshots')
       await mkdir(dir, { recursive: true })
       const base = args.name !== undefined && args.name.trim() !== ''
         ? args.name.trim().replace(/[^a-zA-Z0-9._-]/gu, '_')
@@ -378,13 +378,14 @@ export function registerChromeTools(ctx: Context, browser: BrowserService): void
 
   ctx.tools.register(defineTool({
     name: 'browser_close',
-    description: 'Close the Chrome session.',
+    description: 'Close the browser session.',
     parameters: {},
     output: { schema: { type: 'string' }, render: textRender },
     async execute(_args, exec) {
       exec.signal.throwIfAborted()
+      const label = browser.label
       await browser.close()
-      return 'Chrome closed.'
+      return `${label} closed.`
     },
   }))
 }
