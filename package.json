@@ -1,5 +1,5 @@
 {
-  "name": "dsh-browser",
+  "name": "dsh-browser-driver",
   "version": "0.1.0",
   "description": "Browser control for DeepSeek Harness: a /browser command plus browser_* tools over CDP (Chrome by default).",
   "type": "module",

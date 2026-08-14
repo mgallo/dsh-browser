@@ -4,7 +4,7 @@
  * Chromium over CDP, and expose the active page plus tab/console/network
  * state to the tool layer. The owning plugin's fiber closes the browser on
  * unload.
- * @module dsh-browser/browser
+ * @module dsh-browser-driver/browser
  */
 
 import { homedir } from 'node:os'

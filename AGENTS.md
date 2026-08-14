@@ -1,4 +1,4 @@
-# AGENTS.md — dsh-browser
+# AGENTS.md — dsh-browser-driver
 
 Guidance for AI agents working on this repository. Read this before changing
 anything; it encodes the harness integration contract and the pitfalls that
@@ -6,7 +6,7 @@ were already paid for once.
 
 ## What this is
 
-`dsh-browser` is an out-of-tree **bundle plugin for
+`dsh-browser-driver` is an out-of-tree **bundle plugin for
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)**. It gives
 a harness agent browser control the way Claude Code's `/chrome` does: a
 `/browser` slash command plus a set of model-facing `browser_*` tools.
@@ -32,7 +32,7 @@ src/index.ts        apply(ctx, config): mounts BrowserService, registers /browse
 src/browser.ts      BrowserService — Playwright browser lifecycle (engine selection), tabs, console/network collectors
 src/tools.ts        the 15 browser_* tool definitions (defineTool)
 src/config.ts       Config interface + Schemastery schema (browserType + all defaults)
-cordis.patch.yml    bundle layer: inserts row `name: dsh-browser` (the installed package)
+cordis.patch.yml    bundle layer: inserts row `name: dsh-browser-driver` (the installed package)
 dev.patch.yml       dev overlay (--patch flow); gitignored, copied from dev.patch.yml.example
 tsconfig.json       typecheck config (moduleResolution: bundler; see "Typecheck")
 tsdown.config.ts    build config (ESM bundle, externals kept external)
@@ -47,7 +47,7 @@ A harness plugin is a module with **named exports only** — the Loader's
 export breaks it. Our bundle emits `export { Config, apply, inject, name }`
 (verified: no `default`).
 
-- `export const name = 'dsh-browser'`
+- `export const name = 'dsh-browser-driver'`
 - `export const inject = ['tools', 'commands']` — the plugin stays PENDING until
   those services exist; order in `cordis.yml` does not matter.
 - `export function apply(ctx, config)` — registers everything; registrations are

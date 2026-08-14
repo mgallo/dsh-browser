@@ -1,6 +1,6 @@
 /**
  * Plugin configuration, validated by Schemastery before `apply` runs.
- * @module dsh-browser/config
+ * @module dsh-browser-driver/config
  */
 
 import Schema from '@deepseek-ai/schemastery'

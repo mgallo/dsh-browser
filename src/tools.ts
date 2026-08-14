@@ -3,7 +3,7 @@
  * Every tool operates on the shared {@link BrowserService} and returns a clear
  * error when the browser is not open, so the model can recover by running
  * `/browser` or calling `browser_open`.
- * @module dsh-browser/tools
+ * @module dsh-browser-driver/tools
  */
 
 import { mkdir, writeFile } from 'node:fs/promises'

@@ -1,4 +1,4 @@
-# dsh-browser
+# dsh-browser-driver
 
 Browser control for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): a `/browser` slash command plus a set of `browser_*` tools, mirroring the `/chrome` experience of Claude Code.
 
@@ -118,7 +118,7 @@ Set in `cordis.patch.yml` under the `browser` row (all fields have defaults):
 ```yaml
 - insert:
     - id: browser
-      name: dsh-browser
+      name: dsh-browser-driver
       config:
         browserType: chromium
         channel: msedge
@@ -132,7 +132,7 @@ and use `channel: firefox`:
 ```yaml
 - insert:
     - id: browser
-      name: dsh-browser
+      name: dsh-browser-driver
       config:
         browserType: firefox
         executablePath: /Applications/Firefox.app/Contents/MacOS/firefox
@@ -143,7 +143,7 @@ and use `channel: firefox`:
 ```yaml
 - insert:
     - id: browser
-      name: dsh-browser
+      name: dsh-browser-driver
       config:
         browserType: webkit
         executablePath: /path/to/WebKit
@@ -159,7 +159,7 @@ and use `channel: firefox`:
 ```yaml
 - insert:
     - id: browser
-      name: dsh-browser
+      name: dsh-browser-driver
       config:
         connectEndpoint: 'http://127.0.0.1:9222'
 ```

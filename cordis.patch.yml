@@ -1,9 +1,9 @@
-# dsh-browser bundle layer: mounts the browser-control plugin beside the base
+# dsh-browser-driver bundle layer: mounts the browser-control plugin beside the base
 # composition. The row references the installed package by name so Node
 # resolution finds it through the profile's node_modules.
 - insert:
     - id: browser
-      name: dsh-browser
+      name: dsh-browser-driver
       config:
         # Browser engine: chromium | firefox | webkit.
         browserType: chromium

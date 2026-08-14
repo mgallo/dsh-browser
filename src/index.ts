@@ -1,12 +1,12 @@
 /**
- * dsh-browser plugin: a `/browser` slash command plus a set of browser_* tools
+ * dsh-browser-driver plugin: a `/browser` slash command plus a set of browser_* tools
  * that control a dedicated web browser (Google Chrome by default) over CDP,
  * mirroring the `/chrome` experience of Claude Code.
  *
  * The plugin is host-only (Node): it launches or attaches to a browser with
  * Playwright and registers model-facing tools whose schemas flow into the
  * system prompt automatically.
- * @module dsh-browser
+ * @module dsh-browser-driver
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,7 +16,7 @@ import { BrowserService, browserAliases, resolveBrowserAlias, type BrowserSpec }
 import { Config } from './config.ts'
 import { registerBrowserTools } from './tools.ts'
 
-export const name = 'dsh-browser'
+export const name = 'dsh-browser-driver'
 
 export const inject = ['tools', 'commands']
 
